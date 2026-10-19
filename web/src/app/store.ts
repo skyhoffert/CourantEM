@@ -25,7 +25,8 @@ export interface Result {
 }
 
 export interface State {
-  source: 'gcpw' | 'board';
+  /** gcpw: built-in line (vias, copper thickness); ref: the idealised native-reference line; board: an imported file */
+  source: 'gcpw' | 'ref' | 'board';
   params: RunParams;
   backend: 'cpu' | 'gpu';
   threads: number;           // 0 = auto

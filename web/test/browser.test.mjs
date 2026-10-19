@@ -1,5 +1,6 @@
 // End-to-end browser test: serves web/dist, runs the GCPW demo in headless
 // Chromium (Web Worker + wasm), and compares S-parameters with the native app.
+// Uses the reference GCPW source, which mirrors solver/apps/gcpw_line.c.
 // Usage: node web/test/browser.test.mjs <native run dir with sparams.csv>
 import { chromium } from 'playwright';
 import { createServer } from 'node:http';
@@ -22,6 +23,8 @@ const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH 
 const page = await browser.newPage({ locale: 'en-US', serviceWorkers: 'block' });
 page.on('console', (m) => console.log('[page]', m.text()));
 await page.goto(url);
+// the reference line is the one gcpw_line simulates (idealised fence walls, zero-thickness copper)
+await page.selectOption('#source', 'ref');
 const params = JSON.parse(process.env.GCPW_PARAMS || '{}');
 for (const [k, v] of Object.entries(params)) {
   if (k === 'ports' || k === 'backend') await page.selectOption('#' + k, String(v));

@@ -8,6 +8,7 @@ import { ModelPanel } from './app/view3d.ts';
 import { defaultGcpw, gcpwMesh } from './scenarios/gcpw.ts';
 import { estimate } from './mesh/mesher.ts';
 import { planBoard } from './import/boardsim.ts';
+import { GCPW_NET, gcpwBoard } from './scenarios/gcpwboard.ts';
 import { inputFromFiles, loadBoard, type BoardInput } from './import/load.ts';
 import type { StackupRow } from './import/gerber.ts';
 import { toTouchstone } from './app/touchstone.ts';
@@ -21,7 +22,7 @@ const store = new Store({
   threads: 0,
   gpuAvailable: 'gpu' in navigator,
   ref50: true,
-  run: { phase: 'idle', message: 'Substrate 254 µm, strip 500 µm, gaps 200 µm, via fences 300 µm from the gaps.', progress: 0 },
+  run: { phase: 'idle', message: 'Substrate 254 µm, strip 500 µm, gaps 200 µm, 1 oz copper, via fences (0.3 mm drills, 0.8 mm pitch) 300 µm from the gaps.', progress: 0 },
 });
 
 // ---- controls: DOM -> actions; state -> DOM ----
@@ -49,7 +50,7 @@ class ControlsPanel implements Panel {
     $<HTMLSelectElement>('backend').addEventListener('change', (e) =>
       store.dispatch({ type: 'backend', backend: (e.target as HTMLSelectElement).value as 'cpu' | 'gpu' }));
     $<HTMLSelectElement>('source').addEventListener('change', (e) =>
-      store.dispatch({ type: 'source', source: (e.target as HTMLSelectElement).value as 'gcpw' | 'board' }));
+      store.dispatch({ type: 'source', source: (e.target as HTMLSelectElement).value as State['source'] }));
     $<HTMLSelectElement>('net').addEventListener('change', (e) =>
       store.dispatch({ type: 'net', net: (e.target as HTMLSelectElement).value }));
     $<HTMLInputElement>('file').addEventListener('change', async (e) => {
@@ -76,7 +77,7 @@ class ControlsPanel implements Panel {
     $<HTMLButtonElement>('save').addEventListener('click', () => {
       const s = store.get();
       if (!s.result) return;
-      const name = s.source === 'board' && s.board ? s.board.name.replace(/\.kicad_pcb$/, '').replace(/ \(Gerber\)$/, '') : 'gcpw';
+      const name = s.source === 'board' && s.board ? s.board.name.replace(/\.kicad_pcb$/, '').replace(/ \(Gerber\)$/, '') : s.source === 'ref' ? 'gcpw-ref' : 'gcpw';
       const blob = new Blob([toTouchstone(s.result, name)], { type: 'text/plain' });
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
@@ -88,8 +89,12 @@ class ControlsPanel implements Panel {
   update(s: State): void {
     $<HTMLSelectElement>('source').value = s.source;
     const board = s.source === 'board';
-    for (const id of ['dx', 'len', 'er', 'ports']) ($(id) as HTMLInputElement).disabled = board;
-    for (const id of ['offlo', 'offhi', 'thick', 'full2', 'ywin']) ($(id) as HTMLInputElement).disabled = !board || !s.board;
+    const ref = s.source === 'ref';
+    // the built-in and board lines are meshed by the rule-based mesher (no dx) with mode ports
+    for (const id of ['dx', 'ports']) ($(id) as HTMLInputElement).disabled = !ref;
+    for (const id of ['len', 'er']) ($(id) as HTMLInputElement).disabled = board;
+    ($('thick') as HTMLInputElement).disabled = ref || (board && !s.board);
+    for (const id of ['offlo', 'offhi', 'full2', 'ywin']) ($(id) as HTMLInputElement).disabled = !board || !s.board;
     if (s.board && document.activeElement !== $('offlo')) $<HTMLInputElement>('offlo').value = String(+(s.board.offsets[0] * 1e3).toFixed(4));
     if (s.board && document.activeElement !== $('offhi')) $<HTMLInputElement>('offhi').value = String(+(s.board.offsets[1] * 1e3).toFixed(4));
     const sel = $<HTMLSelectElement>('net');
@@ -207,12 +212,15 @@ class EstimatePanel implements Panel {
       prev.threads === s.threads) return;
     const el = $<HTMLParagraphElement>('estimate');
     let m: { x: number[]; y: number[]; z: number[] }, tSim = 0.35e-9;
-    if (s.source === 'board') {
-      if (!s.board?.net) { el.textContent = ''; return; }
+    if (s.source !== 'ref') {
+      if (s.source === 'board' && !s.board?.net) { el.textContent = ''; return; }
       try {
-        const p = planBoard(s.board.model, { fmax: s.params.fmax, df: s.params.df, hmin: s.params.hmin, thickCopper: s.params.thick,
-          yWindow: s.params.ywin || undefined,
-          ports: [{ net: s.board.net, edge: 'xlo', offset: s.board.offsets[0] }, { net: s.board.net, edge: 'xhi', offset: s.board.offsets[1] }] });
+        const sb = s.source === 'board' ? s.board : undefined;
+        const model = sb ? sb.model : gcpwBoard(s.params), net = sb ? sb.net : GCPW_NET;
+        const off = sb ? sb.offsets : [0, 0], ywin = sb ? s.params.ywin : 0;
+        const p = planBoard(model, { fmax: s.params.fmax, df: s.params.df, hmin: s.params.hmin, thickCopper: s.params.thick,
+          yWindow: ywin || undefined,
+          ports: [{ net, edge: 'xlo', offset: off[0] }, { net, edge: 'xhi', offset: off[1] }] });
         m = p;
         // the source pulse (10.5 tau, as the run sets it) plus the transit through board and feeds with margin
         const tau = Math.sqrt(6.9) / (Math.PI * 1.25 * s.params.fmax);
@@ -271,6 +279,10 @@ function run(): void {
   if (s.source === 'board' && s.board) {
     worker.postMessage({ type: 'run-board', input: s.board.input, stackup: s.board.stackup, offsets: s.board.offsets, net: s.board.net, fmax: s.params.fmax, df: s.params.df,
       hmin: s.params.hmin, lossy: s.params.lossy, thick: s.params.thick, full2: s.params.full2, ywin: s.params.ywin, decay: s.params.decay, tmax: s.params.tmax, backend: s.backend, threads: s.threads, wasmUrl });
+  } else if (s.source === 'gcpw') {
+    // symmetric line: one run, S22 = S11 and S12 = S21
+    worker.postMessage({ type: 'run-board', builtin: { len: s.params.len, er: s.params.er }, offsets: [0, 0], net: GCPW_NET, fmax: s.params.fmax, df: s.params.df,
+      hmin: s.params.hmin, lossy: s.params.lossy, thick: s.params.thick, full2: false, ywin: 0, decay: s.params.decay, tmax: s.params.tmax, backend: s.backend, threads: s.threads, wasmUrl });
   } else {
     worker.postMessage({ type: 'run-gcpw', params: { ...defaultGcpw, ...s.params }, backend: s.backend, threads: s.threads, wasmUrl });
   }
