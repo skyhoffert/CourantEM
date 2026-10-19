@@ -6,6 +6,7 @@
     "lib": [
       "ES2022",
       "DOM",
+      "DOM.Iterable",
       "WebWorker"
     ],
     "strict": true,
@@ -14,7 +15,9 @@
     "verbatimModuleSyntax": true,
     "erasableSyntaxOnly": true,
     "skipLibCheck": true,
-    "types": []
+    "types": [
+      "@webgpu/types"
+    ]
   },
   "include": [
     "src"
