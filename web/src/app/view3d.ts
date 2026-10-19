@@ -66,6 +66,10 @@ export class ModelPanel implements Panel {
     const sun = new THREE.DirectionalLight(0xffffff, 0.9);
     sun.position.set(5, -8, 10);
     this.scene.add(sun);
+    // dimmer fill from below so the bottom side isn't lit by ambient alone
+    const fill = new THREE.DirectionalLight(0xffffff, 0.5);
+    fill.position.set(-5, 8, -10);
+    this.scene.add(fill);
     this.bindMouse();
     new ResizeObserver(() => this.render()).observe(el);
   }
@@ -78,7 +82,8 @@ export class ModelPanel implements Panel {
     c.addEventListener('pointermove', (e: PointerEvent) => {
       if (!drag) return;
       this.theta -= (e.clientX - drag.x) * 0.008;
-      this.phi = Math.min(1.5, Math.max(0.05, this.phi - (e.clientY - drag.y) * 0.008));
+      // full polar range so the bottom side is reachable; stop short of the poles where up = +z degenerates
+      this.phi = Math.min(Math.PI - 0.05, Math.max(0.05, this.phi - (e.clientY - drag.y) * 0.008));
       drag = { x: e.clientX, y: e.clientY };
       this.render();
     });
