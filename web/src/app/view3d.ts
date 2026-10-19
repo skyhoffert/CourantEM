@@ -5,12 +5,13 @@
  */
 import * as THREE from 'three';
 import type { Board } from '../import/kicad.ts';
+import { gcpwBoard } from '../scenarios/gcpwboard.ts';
 import type { Panel, State } from './store.ts';
 
 const COPPER = 0xd08a3a, SUBSTRATE = 0x3f8f6b, VIA = 0xb8b8b8, PORT = 0x2a7de1;
 
-/** The built-in GCPW as a board model, so one renderer serves both sources. */
-export function gcpwAsBoard(len: number): Board {
+/** The reference GCPW (scenarios/gcpw.ts: zero-thickness sheets, solid fence walls) as a board model. */
+function refGcpwAsBoard(len: number): Board {
   const h = 254e-6, w = 500e-6, s = 200e-6, fence = 300e-6;
   const a = w / 2, b = a + s, yf = b + fence, W = yf + 1e-3;
   const rect = (x0: number, y0: number, x1: number, y1: number): [number, number][] => [[x0, y0], [x1, y0], [x1, y1], [x0, y1]];
@@ -66,6 +67,10 @@ export class ModelPanel implements Panel {
     const sun = new THREE.DirectionalLight(0xffffff, 0.9);
     sun.position.set(5, -8, 10);
     this.scene.add(sun);
+    // dimmer fill from below so the bottom side isn't lit by ambient alone
+    const fill = new THREE.DirectionalLight(0xffffff, 0.5);
+    fill.position.set(-5, 8, -10);
+    this.scene.add(fill);
     this.bindMouse();
     new ResizeObserver(() => this.render()).observe(el);
   }
@@ -78,7 +83,8 @@ export class ModelPanel implements Panel {
     c.addEventListener('pointermove', (e: PointerEvent) => {
       if (!drag) return;
       this.theta -= (e.clientX - drag.x) * 0.008;
-      this.phi = Math.min(1.5, Math.max(0.05, this.phi - (e.clientY - drag.y) * 0.008));
+      // full polar range so the bottom side is reachable; stop short of the poles where up = +z degenerates
+      this.phi = Math.min(Math.PI - 0.05, Math.max(0.05, this.phi - (e.clientY - drag.y) * 0.008));
       drag = { x: e.clientX, y: e.clientY };
       this.render();
     });
@@ -87,15 +93,21 @@ export class ModelPanel implements Panel {
 
   update(s: State, prev: State | undefined): void {
     if (!this.renderer) return;
-    const board = s.source === 'board' ? s.board?.model : gcpwAsBoard(s.params.len);
-    const key = s.source === 'board' ? `b:${s.board?.rev}` : `g:${s.params.len}`;
+    const board = s.source === 'board' ? s.board?.model : s.source === 'gcpw' ? gcpwBoard(s.params) : refGcpwAsBoard(s.params.len);
+    // the reference line is always simulated with zero-thickness sheets
+    const thick = s.source !== 'ref' && s.params.thick;
+    const shape = s.source === 'board' ? `b:${s.board?.rev}` : `${s.source}:${s.params.len}`;
     this.planes = s.source === 'board' && s.board ? s.board.offsets : [0, 0];
-    if (board && key !== this.key) { this.key = key; this.build(board); }
+    if (board && `${shape}:${thick}` !== this.key) {
+      // keep the camera when only the copper thickness changed
+      this.build(board, thick, !this.key.startsWith(`${shape}:`));
+      this.key = `${shape}:${thick}`;
+    }
     if (!prev || s.result !== prev.result) this.showField(s);
     this.render();
   }
 
-  private build(b: Board) {
+  private build(b: Board, thick: boolean, frame: boolean) {
     this.root.clear();
     this.field = undefined;
     const mm = 1e3;
@@ -108,26 +120,55 @@ export class ModelPanel implements Panel {
       this.root.add(m);
     }
     const cu = new THREE.MeshStandardMaterial({ color: COPPER, metalness: 0.6, roughness: 0.35, side: THREE.DoubleSide });
-    const zOf = (layer: string) => (b.layers.find((l) => l.name === layer)?.z0 ?? 0) * mm;
+    // copper z extent as simulated: the stackup thickness extruded up from the layer
+    // surface (down from it for the bottom layer, which lies under the substrate), or a
+    // zero-thickness sheet
+    const cuZ = (layer: string): [number, number] => {
+      const l = b.layers.find((q) => q.name === layer);
+      const z = (l?.z0 ?? 0) * mm, t = thick ? (l?.thickness ?? 0) * mm : 0;
+      return layer === b.copperLayers[0] ? [z - t, z] : [z, z + t];
+    };
+    const inPoly = (pts: [number, number][], [px, py]: [number, number]) => {
+      let inside = false;
+      for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+        const [xi, yi] = pts[i], [xj, yj] = pts[j];
+        if ((yi > py) !== (yj > py) && px < ((xj - xi) * (py - yi)) / (yj - yi) + xi) inside = !inside;
+      }
+      return inside;
+    };
     for (const p of b.polys) {
       const sh = new THREE.Shape(p.pts.map((q) => new THREE.Vector2(q[0] * mm, q[1] * mm)));
-      const m = new THREE.Mesh(new THREE.ShapeGeometry(sh), cu);
-      m.position.z = zOf(p.layer) + (p.layer === b.copperLayers[0] ? -0.002 : 0.004);
+      // drill holes where via barrels pass through this copper (the barrel fills them)
+      for (const v of b.vias) {
+        if (!v.layers.includes(p.layer) || !inPoly(p.pts, v.at)) continue;
+        const hole = new THREE.Path();
+        hole.absarc(v.at[0] * mm, v.at[1] * mm, (v.drill / 2) * mm, 0, 2 * Math.PI, true);
+        sh.holes.push(hole);
+      }
+      const [z0, z1] = cuZ(p.layer);
+      const m = z1 > z0
+        ? new THREE.Mesh(new THREE.ExtrudeGeometry(sh, { depth: z1 - z0, bevelEnabled: false }), cu)
+        : new THREE.Mesh(new THREE.ShapeGeometry(sh), cu);
+      m.position.z = z1 > z0 ? z0 : z0 + (p.layer === b.copperLayers[0] ? -0.002 : 0.004);
       this.root.add(m);
     }
     for (const t of b.tracks) {
       const dx = (t.b[0] - t.a[0]) * mm, dy = (t.b[1] - t.a[1]) * mm, L = Math.hypot(dx, dy);
-      const m = new THREE.Mesh(new THREE.PlaneGeometry(L + t.width * mm, t.width * mm), cu);
-      m.position.set(((t.a[0] + t.b[0]) / 2) * mm, ((t.a[1] + t.b[1]) / 2) * mm, zOf(t.layer) + 0.006);
+      const [z0, z1] = cuZ(t.layer);
+      const m = z1 > z0
+        ? new THREE.Mesh(new THREE.BoxGeometry(L + t.width * mm, t.width * mm, z1 - z0), cu)
+        : new THREE.Mesh(new THREE.PlaneGeometry(L + t.width * mm, t.width * mm), cu);
+      m.position.set(((t.a[0] + t.b[0]) / 2) * mm, ((t.a[1] + t.b[1]) / 2) * mm, z1 > z0 ? (z0 + z1) / 2 : z0 + 0.006);
       m.rotation.z = Math.atan2(dy, dx);
       this.root.add(m);
     }
     const viaMat = new THREE.MeshStandardMaterial({ color: VIA, metalness: 0.7, roughness: 0.3 });
     for (const v of b.vias) {
-      const h = b.thickness * mm;
-      const m = new THREE.Mesh(new THREE.CylinderGeometry(v.drill / 2 * mm, v.drill / 2 * mm, h, 16), viaMat);
+      // barrel (drill diameter, solid as in the simulation) through the copper it joins
+      const zs = v.layers.flatMap(cuZ), zl = Math.min(...zs), zh = Math.max(...zs);
+      const m = new THREE.Mesh(new THREE.CylinderGeometry(v.drill / 2 * mm, v.drill / 2 * mm, zh - zl, 16), viaMat);
       m.rotation.x = Math.PI / 2;
-      m.position.set(v.at[0] * mm, v.at[1] * mm, h / 2);
+      m.position.set(v.at[0] * mm, v.at[1] * mm, (zl + zh) / 2);
       this.root.add(m);
     }
     const walls = (b as Board & { walls?: { y: number; z0: number; z1: number; x0: number; x1: number }[] }).walls ?? [];
@@ -145,6 +186,7 @@ export class ModelPanel implements Panel {
       m.position.set(x * mm, ((y0 + y1) / 2) * mm, b.thickness * mm * 1.5);
       this.root.add(m);
     }
+    if (!frame) return;
     this.target.set(((x0 + x1) / 2) * mm, ((y0 + y1) / 2) * mm, 0);
     this.dist = 2.3 * Math.max((x1 - x0) * mm, (y1 - y0) * mm, 4);
   }

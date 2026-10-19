@@ -3,6 +3,7 @@
  * Solver worker: builds and runs a simulation off the main thread.
  * In:  { type: 'run-gcpw', params, backend, wasmUrl }
  *      { type: 'run-board', input (KiCad text or Gerber files), stackup, net, fmax, df, hmin, lossy, backend, wasmUrl }
+ *      { type: 'run-board', builtin: { len, er } (the built-in GCPW board), net, ... }
  * Out: 'setup' | 'progress' | 'done' (S-parameters, Z0, field snapshot) | 'error'
  */
 import { Courant, type Complex, type Sim } from './courant.ts';
@@ -10,6 +11,7 @@ import { buildGcpw, gcpwResults, type GcpwParams } from '../scenarios/gcpw.ts';
 import { GpuEngine } from '../gpu/engine.ts';
 import { loadBoard } from '../import/load.ts';
 import { buildBoardSim } from '../import/boardsim.ts';
+import { gcpwBoard } from '../scenarios/gcpwboard.ts';
 import { dropCheckpoint, loadCheckpoint, runKey, saveCheckpoint } from './checkpoints.ts';
 
 declare const self: DedicatedWorkerGlobalScope;
@@ -130,7 +132,7 @@ self.onmessage = async (ev: MessageEvent) => {
     cemRef = cem;
     const t0 = performance.now();
     if (m.type === 'run-board') {
-      const board = loadBoard(m.input, m.stackup).board;
+      const board = m.builtin ? gcpwBoard(m.builtin) : loadBoard(m.input, m.stackup).board;
       // one run per excited port: port 1 always; port 2 too for a full (non-symmetric) 2-port
       const nRuns = m.full2 ? 2 : 1;
       const waves: { w1: ReturnType<Sim['modePortWaves']>; w2: ReturnType<Sim['modePortWaves']> }[] = [];
