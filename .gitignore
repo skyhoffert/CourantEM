@@ -1,0 +1,12 @@
+build/
+*.o
+*.a
+*.wasm
+node_modules/
+dist/
+__pycache__/
+*.pyc
+validation/runs/
+web/node_modules
+web/dist/
+web/.vendor/

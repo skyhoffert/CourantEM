@@ -1,0 +1,24 @@
+{
+  "name": "courant-em",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Browser-based full-wave 3D electromagnetic solver (FDTD)",
+  "license": "MIT",
+  "scripts": {
+    "build": "node build.mjs",
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.test.json",
+    "test": "node test/parity.test.ts && node test/mesher.test.ts && node test/kicad.test.ts && node test/gerber.test.ts && node test/thick.test.ts && node test/import.test.ts && node test/ports.test.ts && node test/launch.test.ts",
+    "test:browser": "node test/browser.test.mjs && node test/gpu.test.mjs && node test/board.test.mjs && SOURCE=gerber node test/board.test.mjs && node test/resume.test.mjs && node test/threads.test.mjs && COI=sw node test/threads.test.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0",
+    "typescript": "^5.9.0",
+    "@types/node": "^22.0.0",
+    "playwright": "^1.56.0"
+  },
+  "dependencies": {
+    "three": "^0.170.0",
+    "uplot": "^1.6.31"
+  }
+}

@@ -1,0 +1,48 @@
+name: deploy
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        run: |
+          sudo apt-get update && sudo apt-get install -y clang lld
+          curl -sSL https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-25/wasi-sysroot-25.0.tar.gz | tar xz -C /opt
+          curl -sSL https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-25/libclang_rt.builtins-wasm32-wasi-25.0.tar.gz | tar xz -C /opt
+          RD=$(clang -print-resource-dir)
+          for d in wasip1 wasip1-threads; do
+            sudo mkdir -p $RD/lib/$d
+            sudo cp /opt/libclang_rt.builtins-wasm32-wasi-25.0/libclang_rt.builtins-wasm32.a $RD/lib/$d/
+          done
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: make -C solver wasm WASI_SYSROOT=/opt/wasi-sysroot-25.0 WASI_RT=/opt/libclang_rt.builtins-wasm32-wasi-25.0
+      - working-directory: web
+        run: npm install && npm run build
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web/dist
+  deploy:
+    needs: build
+    runs-on: ubuntu-24.04
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

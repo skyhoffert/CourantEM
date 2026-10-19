@@ -1,0 +1,48 @@
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  solver:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        run: |
+          sudo apt-get update && sudo apt-get install -y clang lld python3-numpy python3-scipy python3-matplotlib
+          curl -sSL https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-25/wasi-sysroot-25.0.tar.gz | tar xz -C /opt
+          curl -sSL https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-25/libclang_rt.builtins-wasm32-wasi-25.0.tar.gz | tar xz -C /opt
+          # clang looks for the wasm builtins in its resource dir
+          RD=$(clang -print-resource-dir)
+          for d in wasip1 wasip1-threads; do
+            sudo mkdir -p $RD/lib/$d
+            sudo cp /opt/libclang_rt.builtins-wasm32-wasi-25.0/libclang_rt.builtins-wasm32.a $RD/lib/$d/
+          done
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Build and test (native)
+        run: make -C solver && make -C solver test
+      - name: WebAssembly build and parity
+        run: |
+          make -C solver wasm WASI_SYSROOT=/opt/wasi-sysroot-25.0 WASI_RT=/opt/libclang_rt.builtins-wasm32-wasi-25.0
+          make -C solver parity WASI_SYSROOT=/opt/wasi-sysroot-25.0 WASI_RT=/opt/libclang_rt.builtins-wasm32-wasi-25.0
+      - name: References and tools
+        run: |
+          python3 tools/gcpw_ref.py
+          python3 tools/gcpw_ref.py --t 35e-6
+          python3 tools/test_compare_s2p.py
+      - name: Web
+        working-directory: web
+        run: |
+          npm install
+          npm run typecheck
+          npm run build
+          npm test
+      - name: Browser (headless Chromium, SwiftShader WebGPU)
+        working-directory: web
+        run: |
+          npx playwright install --with-deps chromium
+          npm run test:browser

@@ -1,0 +1,18 @@
+/** KiCad 7 board: 50-ohm microstrip on 10-mil RO4350B over a solid bottom plane.
+ * Run: node web/test/fixtures/make_msl_board.ts > web/test/fixtures/msl.kicad_pcb */
+const L = 8, W = 6, yc = W / 2, w = 0.55;
+console.log(`(kicad_pcb (version 20221018) (generator pcbnew)
+  (general (thickness 0.324))
+  (layers (0 "F.Cu" signal) (31 "B.Cu" signal) (44 "Edge.Cuts" user))
+  (setup (stackup
+    (layer "F.Cu" (type "copper") (thickness 0.035))
+    (layer "dielectric 1" (type "core") (thickness 0.254) (material "RO4350B") (epsilon_r 3.66) (loss_tangent 0.0037))
+    (layer "B.Cu" (type "copper") (thickness 0.035))))
+  (net 0 "") (net 1 "RF") (net 2 "GND")
+  (gr_rect (start 0 0) (end ${L} ${W}) (layer "Edge.Cuts") (width 0.1))
+  (segment (start 0 ${yc}) (end ${L} ${yc}) (width ${w}) (layer "F.Cu") (net 1))
+  (zone (net 2) (net_name "GND") (layer "B.Cu")
+    (filled_polygon (layer "B.Cu") (pts (xy 0 0) (xy ${L} 0) (xy ${L} ${W}) (xy 0 ${W}))))
+)`);
+
+export {};

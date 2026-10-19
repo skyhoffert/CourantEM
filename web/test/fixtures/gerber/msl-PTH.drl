@@ -1,0 +1,7 @@
+M48
+; DRILL file {KiCad} ; TYPE=PLATED
+METRIC
+%
+G90
+G05
+M30

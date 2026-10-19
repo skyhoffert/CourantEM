@@ -1,0 +1,4 @@
+
+## CPML storage (compact)
+
+The CPML auxiliaries ψ exist only on the PML planes of their derivative axis. Each of the 12 arrays (ψE and ψH for each field component and each of its two transverse derivatives; ψX[c][w] belongs to axis (c + w + 1) mod 3) holds the low-slab planes then the high-slab planes of that axis, each plane over the full node extent of the other two axes. The GPU kernels use the same layout, where the compact index is simply the CPML kernel's thread index. Compared with full-volume ψ arrays this cut memory by a third on the 0.5 M-point GCPW (109 → 72 MB in f64), more on larger domains, and the largest GPU binding is now a field array (3N floats) instead of ψ (12N), so a GPU with the common 128 MB binding limit takes ~11 M points instead of ~2.7 M. Results are bit-identical to the full-volume layout.

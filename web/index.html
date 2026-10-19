@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Courant EM</title>
+  <style>
+    :root { --bg: #fbfbfa; --fg: #1d1f21; --muted: #5f6368; --grid: #e3e3e0; --accent: #2a7de1; --card: #ffffff; }
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) { --bg: #16181b; --fg: #e8e8e6; --muted: #a0a4a8; --grid: #2c2f33; --accent: #6aa8ff; --card: #1e2125; }
+    }
+    :root[data-theme="dark"] { --bg: #16181b; --fg: #e8e8e6; --muted: #a0a4a8; --grid: #2c2f33; --accent: #6aa8ff; --card: #1e2125; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+    main { max-width: 1240px; margin: 0 auto; padding: 24px 16px 48px; }
+    h1 { font-size: 22px; margin: 0 0 4px; letter-spacing: -0.01em; }
+    h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin: 0 0 10px; font-weight: 600; }
+    .sub { color: var(--muted); margin: 0 0 20px; max-width: 900px; }
+    .grid { display: grid; grid-template-columns: 340px 1fr; gap: 16px; align-items: start; }
+    @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+    .card { background: var(--card); border: 1px solid var(--grid); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+    .stack { display: flex; flex-direction: column; gap: 10px; }
+    .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    label { display: flex; flex-direction: column; font-size: 13px; color: var(--muted); gap: 4px; }
+    label.check { flex-direction: row; align-items: center; gap: 6px; }
+    label.check input { width: auto; }
+    input, select { width: 100%; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--grid); background: var(--bg); color: var(--fg); font: inherit; }
+    input:disabled, select:disabled { opacity: 0.45; }
+    button { padding: 9px 16px; border-radius: 6px; border: 0; background: var(--accent); color: #fff; font: inherit; font-weight: 600; cursor: pointer; }
+    button:disabled { opacity: 0.5; cursor: default; }
+    button.secondary { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
+    progress { width: 100%; height: 6px; }
+    #status, #estimate, .muted { color: var(--muted); font-size: 13px; margin: 0; font-variant-numeric: tabular-nums; }
+    #model { height: 360px; border-radius: 8px; overflow: hidden; }
+    #model canvas { display: block; cursor: grab; }
+    #plots .u-title { font-size: 13px; font-weight: 600; color: var(--fg); }
+    #plots .u-legend { color: var(--fg); font-size: 12px; }
+    #stackup { border-collapse: collapse; font-size: 12px; width: 100%; table-layout: fixed; }
+    #stackup th:first-child { width: 27%; }
+    #stackup th { color: var(--muted); font-weight: 600; text-align: left; padding: 2px 4px; }
+    #stackup td { padding: 2px 4px; }
+    #stackup td.name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    #stackup tr.cu td.name { color: #c87533; font-weight: 600; }
+    #stackup input { padding: 3px 4px; min-width: 0; -moz-appearance: textfield; appearance: textfield; }
+    #stackup input::-webkit-inner-spin-button, #stackup input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Courant EM <span id="ver" class="muted" style="font-weight:400;font-size:13px"></span></h1>
+    <p class="sub">Browser-based full-wave FDTD. Simulate the built-in grounded CPW line or load a board (KiCad, or Gerber + drill with the stackup entered below) (a net that runs from the left to the right board edge, over a solid bottom plane). Mode ports launch the line's own eigenmode; results show S in 50 Ω or normalised to the line Z0. Solver: double-precision WebAssembly or single-precision WebGPU.</p>
+    <div class="grid">
+      <div>
+        <div class="card stack">
+          <h2>Structure</h2>
+          <label>Source<select id="source"><option value="gcpw" selected>Built-in GCPW line</option><option value="board">Board file (KiCad or Gerber + drill)</option></select></label>
+          <label>Board files<input id="file" type="file" multiple accept=".kicad_pcb,.gbr,.ger,.gtl,.gbl,.g1,.g2,.g3,.g4,.gko,.gm1,.gml,.drl,.xln,.txt,.cmp,.sol"></label>
+          <p class="muted">One .kicad_pcb, or all copper Gerbers, the outline and the drill files together.</p>
+          <label>Port net<select id="net"></select></label>
+          <div class="row2">
+            <label>Left port plane (mm in)<input id="offlo" type="number" value="0" min="0" step="0.1"></label>
+            <label>Right port plane (mm in)<input id="offhi" type="number" value="0" min="0" step="0.1"></label>
+          </div>
+          <label>Simulated band around the net (± mm, 0 = whole board)<input id="ywin" type="number" value="0" min="0" step="0.5"></label>
+          <div class="row2">
+            <label>Length (mm)<input id="len" type="number" value="10" min="2" step="1"></label>
+            <label>Substrate εr<input id="er" type="number" value="3.66" step="0.01"></label>
+          </div>
+        </div>
+        <div class="card stack" id="stackcard" hidden>
+          <h2>Stackup</h2>
+          <p class="muted">Top to bottom. Edits re-import the board.</p>
+          <div style="overflow-x:auto"><table id="stackup"></table></div>
+          <label class="check"><input id="mask" type="checkbox"> Top solder mask (fills the gaps; approximate)</label>
+        </div>
+        <div class="card stack">
+          <h2>Solver</h2>
+          <div class="row2">
+            <label>Min cell (µm)<input id="hmin" type="number" value="20" min="5" step="5"></label>
+            <label>Line cell dx (µm)<input id="dx" type="number" value="100" min="25" step="25"></label>
+          </div>
+          <div class="row2">
+            <label>Stop at energy (dB)<input id="decaydb" type="number" value="-50" max="-10" step="5"></label>
+            <label>Time limit (ns)<input id="tmax" type="number" value="5" min="0.5" step="0.5"></label>
+          </div>
+          <label>Ports<select id="ports"><option value="mode" selected>Mode (2D eigenmode)</option><option value="lumped">Lumped 50 Ω</option></select></label>
+          <div class="row2">
+            <label>Backend<select id="backend"><option value="cpu" selected>CPU (f64)</option><option value="gpu">GPU (f32)</option></select></label>
+            <label>CPU threads<select id="threads"><option value="0" selected>Auto</option><option value="1">1</option><option value="2">2</option><option value="4">4</option><option value="8">8</option></select></label>
+          </div>
+          <label class="check"><input id="lossy" type="checkbox"> Losses (Djordjevic–Sarkar substrate, copper)</label>
+          <label class="check"><input id="thick" type="checkbox" checked> Copper thickness from the stackup (boards)</label>
+          <label class="check"><input id="full2" type="checkbox"> Full 2-port: excite port 2 too (boards; 2 runs)</label>
+          <label class="check"><input id="ref50" type="checkbox" checked> Show S in 50 Ω</label>
+          <p id="estimate"></p>
+          <div class="row2"><button id="run">Run</button><button id="save" class="secondary" disabled>Save .s2p</button></div>
+          <progress id="bar" value="0" max="1"></progress>
+          <p id="status"></p>
+        </div>
+      </div>
+      <div>
+        <div class="card"><h2>Model</h2><div id="model"></div></div>
+        <div class="card"><h2>Results</h2><div id="plots"></div></div>
+      </div>
+    </div>
+  </main>
+  <!-- COOP/COEP via a service worker so the multithreaded solver can use SharedArrayBuffer on static hosting (GitHub Pages); reloads once on first visit -->
+  <script src="./coi-serviceworker.js"></script>
+  <script type="module" src="./main.js"></script>
+</body>
+</html>
